@@ -8,6 +8,8 @@ import aiohttp
 import asyncio
 
 
+logger = logging.getLogger(__name__)
+
 class api_logging_handler(logging.Handler):
     """Custom log handler to send log messages and alerts to API
 
@@ -168,9 +170,14 @@ def argparser_librescada():
     return parser
 
 def show_welcome_message(delay=1, clear_screen=False):
+    assets_dir = get_assets_dir(optional=True)
+    if not assets_dir: 
+        logger.warning('Assets directory not found, not showing welcome message')
+        return
+    
+
     try:
-        
-        f = open(os.path.join(get_assets_dir(), 'assets/ascii-art.ans'), 'r')
+        f = open(os.path.join(assets_dir, 'assets/ascii-art.ans'), 'r')
         logo = ''.join(f.readlines())
         if clear_screen:
             os.system('cls' if os.name == 'nt' else 'clear')
@@ -185,7 +192,7 @@ def show_welcome_message(delay=1, clear_screen=False):
         pass
     
 
-def get_assets_dir():
+def get_assets_dir(optional=False):
     """Get assets directory path from environment variable ASSETS_DIR
 
     Returns:
@@ -198,7 +205,12 @@ def get_assets_dir():
     ASSETS_DIR = os.getenv("ASSETS_DIR", None)
     
     if not ASSETS_DIR:
-        raise ValueError("ASSETS_DIR environment variable not set, set it with 'export ASSETS_DIR=<path>' to where the configuration files are located (e.g. 'export ASSETS_DIR=/assets/').")
+        msg = "ASSETS_DIR environment variable not set, set it with 'export ASSETS_DIR=<path>' to where the configuration files are located (e.g. 'export ASSETS_DIR=/assets/')."
+        if optional:
+            logger.warning(msg)
+            return None
+        else:
+            raise ValueError(msg)
     
     else:
         ASSETS_DIR = os.path.abspath(ASSETS_DIR)
