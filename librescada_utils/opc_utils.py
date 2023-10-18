@@ -12,6 +12,8 @@ import logging
 from collections import deque
 from pprint import pprint
 
+from . import flatten_dict
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,11 +36,15 @@ class uaclient_librescada(asyncClient):
             else:
                 url = ua_parameters['url']
             
-            
+        
         self = cls(url=url)
         # self = super().__init__(url=url)
         self.uri = ua_parameters['uri']
+        self.url = url
+        
         self.logger = logging.getLogger(__name__).parent
+        
+        self.logger.info(f'uaclient_librescada: Received URI: {self.uri}')
             
         if secure:
             await self.set_security(
@@ -58,6 +64,14 @@ class uaclient_librescada(asyncClient):
     
     # async def connect():
     #     await super.conn
+    
+    # Override connect method to add reconnection functionality
+    async def connect(self):
+        await super().connect()
+        
+        await self.send_hello()
+        
+        self.logger.info(f'Connected to server {self.url}')
     
     async def get_server_structure(self):
         """ 
@@ -147,6 +161,56 @@ class uaclient_librescada(asyncClient):
         
         return objs
     
+    async def explore_node(self, node, just_structure=False, just_nodes=False):
+        
+        result = {}
+        
+        children = await node.get_children()
+
+        for child in children:
+            child_name = (await child.read_browse_name()).Name
+            if child_name not in ['Server', 'Aliases']:
+                
+                child_children = await child.get_children()
+                
+                if not child_children:
+                    if just_structure:
+                        result[child_name] = None
+                    elif just_nodes:
+                        result[child_name] = child
+                    else:
+                        result[child_name] = {'name': child_name, 'node': child}
+                    
+                else:
+                    if just_structure or just_nodes:
+                        result[child_name] = await self.explore_node(child, just_structure, just_nodes)
+                    else:
+                        if not child_name in result:
+                            result[child_name] = {'name': child_name, 'node': child}
+                        result[child_name]['children'] = await self.explore_node(child, just_structure, just_nodes)
+
+
+            
+        return result
+    
+    async def get_server_structure2(self, just_structure=False, just_nodes=False, flattened=False):
+        
+        
+        objects_node = self.nodes.objects
+        
+        server_structure = await self.explore_node(objects_node, just_structure, just_nodes)
+        
+        if flattened:
+            if not just_structure and not just_nodes:
+                raise ValueError('Flattening only supported for just_structure=True or just_nodes=True')
+            # if just_structure:
+            else:
+                server_structure = flatten_dict(server_structure)
+
+        self.logger.debug(f'Server structure: {server_structure}')
+        
+        return server_structure
+    
     async def reconnect(self, retry_time=None, max_retries=None):
         if not retry_time:
             retry_time = self.default_retry_time
@@ -181,7 +245,18 @@ class uaclient_librescada(asyncClient):
         # Object not found
         return False, []
     
-    async def setup_objects(self, object_name:str, type=None, delete_if_exists=True, include_online=False)-> asyncua.Node:
+    async def check_namespace(self, uri):
+        # Check if uri is already registered
+        avail_uris = await self.get_namespace_array()
+        
+        self.logger.info(f'Avaialable namespaces in server: {avail_uris}')
+        
+        if self.uri not in avail_uris:
+            await self.register_namespace(self.uri)
+            logger.warning(f'URI {self.uri} not found in server, registered')
+    
+    async def setup_objects(self, object_name:str, type=None, delete_if_exists=True, 
+                            include_online=True, include_active=False)-> asyncua.Node:
         """
         Habría que cambiarle el nombre -> get_objects?, también habría que sustituirla para que
         lo único que haga sea comprobar si un objeto existe, borrarlo si se
@@ -196,7 +271,7 @@ class uaclient_librescada(asyncClient):
             (asyncua.Node): Nodes of the created/retrieved objects depending on the type
         """
         
-        async def setup_object(object_name:str, include_online:bool, delete_if_exists:bool) -> asyncua.Node:
+        async def setup_object(object_name:str, include_online:bool, delete_if_exists:bool, include_active:bool) -> asyncua.Node:
             # Retrieve or create object
             found, obj = await self.check_object_in_server(object_name)
             if found:
@@ -211,10 +286,28 @@ class uaclient_librescada(asyncClient):
                 self.logger.info(f'Object {object_name} added to server')
                 
             if include_online:
-                await obj.add_variable(obj.nodeid.Identifier, 'online', False)
+                node = await self.find_nodes(var_list=["online"], object=object_name) 
+    
+                if node[0]: 
+                    online_node = node[0]
+                else: 
+                    online_node = await obj.add_variable(obj.nodeid.Identifier, 'online', False)
                 
-            return obj
+            if include_active:
+                node = await self.find_nodes(var_list=["active"], object=object_name) 
+    
+                if node[0]: 
+                    active_node = node[0]
+                else: 
+                    active_node = await obj.add_variable(obj.nodeid.Identifier, 'active', False)
+                
+            return obj, online_node, active_node
 
+        active_node = None
+        online_node = None
+
+        
+        await self.check_namespace(self.uri)
         idx = await self.get_namespace_index(self.uri)
         if not self.server_structure:
             self.server_structure = await self.get_server_structure()
@@ -227,15 +320,15 @@ class uaclient_librescada(asyncClient):
         if type=='gateway':
             # Retrieve or create measurements object
             object_name = 'measurements'
-            meas_obj = await setup_object(object_name, include_online=False, delete_if_exists=False)
+            meas_obj = await setup_object(object_name, include_online=False, delete_if_exists=False, include_active=False)
 
             # Retrieve or create inputs object
             object_name = 'inputs'
-            inputs_obj = await setup_object(object_name, include_online=False, delete_if_exists=False)
+            inputs_obj = await setup_object(object_name, include_online=False, delete_if_exists=False, include_active=False)
 
             # Retrieve or create gateways object
             object_name = 'gateways'
-            gateways_obj = await setup_object(object_name, include_online=True, delete_if_exists=True)
+            gateways_obj = await setup_object(object_name, include_online=True, delete_if_exists=True, include_active=False)
 
             return meas_obj, inputs_obj, gateways_obj
         
@@ -248,15 +341,16 @@ class uaclient_librescada(asyncClient):
             
             # Retrieve or create controllers object
             object_name = 'controllers'
-            controllers_obj = await setup_object(object_name, include_online=True, delete_if_exists=True)
+            controllers_obj, online_node, active_node = await setup_object(object_name, include_online=True,
+                                                                           delete_if_exists=True, include_active=False)
 
-            return controllers_obj, inputs_obj
+            return controllers_obj, inputs_obj, online_node, active_node
         
         elif type=='data_logging':
             object_name = 'data_logging'
-            obj = await setup_object(object_name, include_online=True, delete_if_exists=True)
+            obj, online_node, active_node = await setup_object(object_name, include_online=True, delete_if_exists=delete_if_exists, include_active=True)
                 
-            return obj
+            return obj, online_node, active_node
         
         # elif type=='test':
         #     # Retrieve or create measurements object
@@ -279,20 +373,20 @@ class uaclient_librescada(asyncClient):
         
         elif type=='signal_generator':
             object_name = 'signal_generator'
-            obj = await setup_object(object_name, include_online=True, delete_if_exists=True)
+            obj, online_node = await setup_object(object_name, include_online=True, delete_if_exists=True, include_active=False)
                 
-            return obj
+            return obj, online_node
         
         elif type=='finite_state_machines':
             object_name = 'finite_state_machines'
-            obj = await setup_object(object_name, include_online=True, delete_if_exists=True)
+            obj, online_node = await setup_object(object_name, include_online=True, delete_if_exists=True)
                 
-            return obj
+            return obj, online_node
         
         else: 
-            obj = await setup_object(object_name, include_online=include_online, delete_if_exists=delete_if_exists)
+            obj, online_node, active_node = await setup_object(object_name, include_online=include_online, delete_if_exists=delete_if_exists, include_active=include_active)
             
-            return obj
+            return obj, online_node, active_node
             # raise ValueError(f'Type {type} not recognized')
 
     async def setup_object(self, object_config:dict, include_online=True, delete_if_exists=True):
@@ -361,7 +455,7 @@ class uaclient_librescada(asyncClient):
                         - folderN
             
         """
-        
+    
         def create_value_of_type(type_str, value=None):
             try:
                 type_ = globals()['__builtins__'][type_str]
@@ -422,7 +516,7 @@ class uaclient_librescada(asyncClient):
                         self.logger.info(f'Variable {child_key} added to object {object_name}')
                                 
             return var
-                    
+        
         object_name = object_config['name']
         
         # Create object in opc server
@@ -458,7 +552,7 @@ class uaclient_librescada(asyncClient):
 
                     child['node'] = await object_node.add_variable(object_node.nodeid.Identifier, child_key, value)
                     self.logger.info(f'Variable {child_key} added to object {object_name}')
-                                             
+                                                
         return object_config, online_node
             
     async def get_signals(self, signal_ids):
@@ -545,7 +639,7 @@ class uaclient_librescada(asyncClient):
         
             if nodeNotFound:
                 var_nodes.append([])
-                self.logger.error(f'Node for variable {var_name} could not be found on server')
+                self.logger.info(f'Node for variable {var_name} could not be found on server')
 
         return var_nodes
             
@@ -591,6 +685,20 @@ class uaclient_librescada(asyncClient):
                 ServerTimestamp=datetime.datetime.utcnow()
             )
             await self.get_node(var).write_value(dv)    
+ 
+    async def get_objects_in_server(self):
+        """ Function that returns the objects in the server """
+        
+        objects_node = self.nodes.objects
+        
+        object_nodes = await objects_node.get_children()
+        objects = []
+        for obj_node in object_nodes:
+            name  = (await obj_node.read_browse_name()).Name
+            if name not in ['Server', 'Aliases']:
+                objects.append(name)
+            
+        return objects
     
 async def get_control_loop(opc_client, controller_name, node_structure=None):
     controller_node = findNodes_sync(opc_client=opc_client, var_list=[controller_name], 
@@ -774,7 +882,10 @@ def readValuesUA(client, group, initial_read=False, log=True):
     return group
 
 async def async_readValuesUA(client, group, initial_read=False, consisting_server_time=False):
-    """Function that reads a group of tags from an OPC UA server
+    """
+    LEGACY function, should use uaclient_librescada.read_values instead
+    
+    Function that reads a group of tags from an OPC UA server
 
     Args:
         client ([type]): asyncua client object
@@ -820,8 +931,11 @@ async def async_readValuesUA(client, group, initial_read=False, consisting_serve
 #         logger.info('datachange_notification %r %s', node, val)
         
 
-async def setup_objects(server, idx, type='gateway'):
-    """Function that creates objects in the OPC UA server if they don't exist
+async def setup_objects(server, idx, type='gateway', object_name=None):
+    """
+    LEGACY function, should use uaclient_librescada.setup_object or (s) instead
+    
+    Function that creates objects in the OPC UA server if they don't exist
 
     Args:
         client (asyncua.Client, requiered): asyncua client object
@@ -865,13 +979,13 @@ async def setup_objects(server, idx, type='gateway'):
         if not found: raise RuntimeError('Object measurements not found in server')
         
         # Retrieve or create controllers object
-        object_name = 'controllers'
+        object_name = 'controllers' if not object_name else object_name
         controllers_obj = await setup_object(object_name)
 
         return controllers_obj, inputs_obj
     
     elif type=='data_logging':
-        object_name = 'data_logging'
+        object_name = 'data_logging' if not object_name else object_name
         obj = await setup_object(object_name)
             
         return obj
@@ -903,7 +1017,7 @@ async def setup_objects(server, idx, type='gateway'):
         return obj
     
     elif type=='finite_state_machines':
-        object_name = 'finite_state_machines'
+        object_name = 'finite_state_machines' if not object_name else object_name
         obj = await setup_object(object_name)
             
         return obj
@@ -997,7 +1111,7 @@ def findNodes(opc_client, var_list, return_node_structure=False, node_structure=
                 
         if nodeNotFound:
             var_nodes.append('')
-            logger.error(f'Node for variable {var_name} could not be found on server')
+            logger.info(f'Node for variable {var_name} could not be found on server')
 
     if return_node_structure: return objs
     else: return var_nodes
@@ -1024,7 +1138,7 @@ def findNode(opc_client, varToFind):
         objs_idx = objs_idx-1
                 
     if nodeNotFound:
-        logger.error(f'Node for variable {varToFind} could not be found on server')
+        logger.info(f'Node for variable {varToFind} could not be found on server')
         return None
     else:
         logger.info(f'Node found for {varToFind}: {varNode}')
@@ -1101,7 +1215,7 @@ def findNodes_sync(opc_client, var_list, object='', folder='', node_structure=[]
         
         if nodeNotFound:
             var_nodes.append([])
-            logger.error(f'Node for variable {var_name} could not be found on server')
+            logger.info(f'Node for variable {var_name} could not be found on server')
 
     return var_nodes
 
@@ -1403,7 +1517,7 @@ async def async_findNodes(opc_client, var_list, object='', folder='', node_struc
        
         if nodeNotFound:
             var_nodes.append([])
-            logger.error(f'Node for variable {var_name} could not be found on server')
+            logger.info(f'Node for variable {var_name} could not be found on server')
 
     return var_nodes
 
@@ -1429,7 +1543,7 @@ async def async_findNode(opc_client, varToFind):
         objs_idx = objs_idx-1
                 
     if nodeNotFound:
-        logger.error(f'Node for variable {varToFind} could not be found on server')
+        logger.info(f'Node for variable {varToFind} could not be found on server')
         return None
     else:
         logger.info(f'Node found for {varToFind}: {varNode}')

@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+import re
 import time
 import argparse
 # import requests
@@ -140,7 +141,7 @@ def get_logger_librescada(name=None, custom_logger=True, api_url=None):
     return logger
     
     
-def argparser_librescada():
+def argparser_librescada(parse=True):
     """Utility function to parse common command line arguments used in librescada:
         - Configuration file to use by the module
         - Whether to connect to a secure server (using certificates and encryption)
@@ -154,7 +155,7 @@ def argparser_librescada():
         
     # Opcional. Nombre del archivo de configuración a usar
     parser.add_argument("-f","--conf_file", help="Configuration filename and path",
-                        required=False, type=str, default='configuration_files/simulated_sytem.hjson', )
+                        required=False, type=str, default='config.hjson', )
     parser.add_argument('--secure', action='store_true', help="Secure server (using certificates and encryption)")
     parser.add_argument('--no-secure', dest='secure', action='store_false', help="Secure server (using certificates and encryption)")
     parser.set_defaults(secure=False)
@@ -166,6 +167,9 @@ def argparser_librescada():
     parser.add_argument('--docker', action='store_true', help="Use container name instead of IP address or localhost in configuration file")
     parser.add_argument('--no-docker', dest='local', action='store_false', help="Use container name instead of IP address or localhost in configuration file")
     parser.set_defaults(docker=False)
+    
+    if parse:
+        logger.info(f'Command line arguments: {parser.parse_args()}')
     
     return parser
 
@@ -386,6 +390,22 @@ def capfirst(s):
         _type_: _description_
     """
     return s[:1].upper() + s[1:]
+
+def flatten_dict(d, parent_key='', separator='_'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{separator}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, separator=separator).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+
+def filter_strings_with_pattern(strings, patterns):
+    filtered_strings = [s for s in strings if any(re.match(pattern, s) for pattern in patterns)]    
+    
+    return filtered_strings
 
 if __name__ == '__main__':
     # Api logger
