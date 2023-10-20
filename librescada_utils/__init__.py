@@ -168,6 +168,9 @@ def argparser_librescada(parse=True):
     parser.add_argument('--no-docker', dest='local', action='store_false', help="Use container name instead of IP address or localhost in configuration file")
     parser.set_defaults(docker=False)
     
+    # parser.add_argument('--password', action='store_true', help="Password to connect to some service (e.g. OPC UA server, database, etc.)",
+    #                     required=False, type=str, default=None)
+    
     if parse:
         logger.info(f'Command line arguments: {parser.parse_args()}')
     
