@@ -700,18 +700,18 @@ class uaclient_librescada(asyncClient):
             
         return objects
     
-async def get_control_loop(opc_client, controller_name, node_structure=None):
-    controller_node = findNodes_sync(opc_client=opc_client, var_list=[controller_name], 
-                                     object='controllers', node_structure=node_structure)
-    if not controller_node[0]:
-        raise RuntimeError(f'Controller {controller_name} not found in OPC server')
-    
-    for var_node in controller_node[0].get_children():
-        var_name = var_node.read_browse_name().Name
-        controller_vars = {}
-        controller_vars[var_name]['node']  = var_node.__str__()
-        
-    return controller_vars
+# async def get_control_loop(opc_client, controller_name, node_structure=None):
+#     controller_node = findNodes_sync(opc_client=opc_client, var_list=[controller_name],
+#                                      object='controllers', node_structure=node_structure)
+#     if not controller_node[0]:
+#         raise RuntimeError(f'Controller {controller_name} not found in OPC server')
+#
+#     for var_node in controller_node[0].get_children():
+#         var_name = var_node.read_browse_name().Name
+#         controller_vars = {}
+#         controller_vars[var_name]['node']  = var_node.__str__()
+#
+#     return controller_vars
 
 class async_extendedClient(asyncClient):
     async def read_values(self, nodes, datavalue=False):

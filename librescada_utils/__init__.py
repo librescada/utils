@@ -11,6 +11,28 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+def setup_logger_librescada(logger:logging.Logger, logLevel=logging.INFO) -> logging.Logger:
+    """Function that configures a given logger in the 
+       standard format for librescada
+
+    Args:
+        logger (logging.Logger): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    formatter = logging.Formatter("%(asctime)s - [%(levelname)s] - %(message)s")
+    
+    logger.setLevel(logLevel)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logLevel)
+    stream_handler.setFormatter(formatter)
+
+    logger.addHandler(stream_handler)
+    
+    return logger
+
 class api_logging_handler(logging.Handler):
     """Custom log handler to send log messages and alerts to API
 
