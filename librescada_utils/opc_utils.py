@@ -11,11 +11,11 @@ import datetime
 import logging
 from collections import deque
 from pprint import pprint
-
+from logger import logger
 from . import flatten_dict
 
-logger = logging.getLogger(__name__)
-
+class uaserver_librescada(asyncServer):
+    pass
 
 class uaclient_librescada(asyncClient):
     """
