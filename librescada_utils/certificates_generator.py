@@ -116,10 +116,14 @@ def generate_applicationgroup_ca(base_ca: Path, ca_id: str = 'librescada_CA') ->
 
 
 async def generate_and_sign_csr(base_ca: Path, base_private: Path, base_csr: Path, base_certs: Path, id: str,
-                                ca_id: str = 'librescada_CA', include_private_key=False) -> None:
+                                ca_id: str = 'librescada_CA', include_private_key=False, application_uri=None) -> None:
 
-    subject_alt_names: List[x509.GeneralName] = [x509.UniformResourceIdentifier(f"urn:{HOSTNAME}:{id}"),
-                                                 x509.DNSName(f"{HOSTNAME}")]
+    subject_alt_names: List[x509.GeneralName] = \
+        [
+            x509.UniformResourceIdentifier(f"urn:{HOSTNAME}:{id}"),
+            x509.DNSName(f"{HOSTNAME}"),
+            x509.UniformResourceIdentifier(f"uri:{application_uri if application_uri else None}"),
+        ]
 
     key: RSAPrivateKey = generate_private_key()
     csr: x509.CertificateSigningRequest = generate_app_certificate_signing_request(key,
@@ -145,7 +149,7 @@ async def generate_and_sign_csr(base_ca: Path, base_private: Path, base_csr: Pat
     # Write the signed certificate to a file
     (base_certs / f'{id}.der').write_bytes(cert.public_bytes(encoding=Encoding.DER))
 
-    logger.info(f"Generated certificate for {id} signed by {ca_id}, valid until {cert.not_valid_after}")
+    logger.info(f"Generated certificate for {id} signed by {ca_id}, valid until {cert.not_valid_after} at {(base_certs / f'{id}.der')}")
 
 
 async def main():
@@ -176,13 +180,16 @@ async def main():
             base_certs.mkdir(parents=True, exist_ok=True)
 
             logger.info(f"Generating certificates for {service_key}")
+            application_uri = service_config.get('application_uri', None)
             # Generate a private key and certificate signing request for the service
             await generate_and_sign_csr(base_ca, base_private, base_csr, base_certs, id=service_key, ca_id=CA_ID,
-                                        include_private_key=True)
+                                        include_private_key=True, application_uri=application_uri)
 
             # Generate a private key and certificate signing request for each user/module
-            for user_id in service_config['users'].values():
-                await generate_and_sign_csr(base_ca, base_private, base_csr, base_certs, id=user_id, ca_id=CA_ID)
+            for user_data in service_config['users'].values():
+                user_id = user_data['username'] if isinstance(user_data, dict) else user_data
+                await generate_and_sign_csr(base_ca, base_private, base_csr, base_certs, id=user_id, ca_id=CA_ID,
+                                            include_private_key=True, application_uri=application_uri)
 
 
 if __name__ == "__main__":
