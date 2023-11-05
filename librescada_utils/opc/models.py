@@ -1,7 +1,8 @@
-from typing import Any, List
+from typing import Any, List, Literal
 from pydantic import field_validator, model_validator, BaseModel, Field, ValidationInfo
 from asyncua import ua
 from asyncua.common.structures104 import new_struct_field
+from .utils import convert_to_ua_type
 
 class Signal(BaseModel):
     """
@@ -14,8 +15,8 @@ class Signal(BaseModel):
     var_id: str = Field(description="Variable ID. Unique, natural name used to refer to the signal (md, Ts_in, Qs, etc)")
     unit: str = Field(description="used to specify the unit of the magnitude being measured (kg/s, ºC, m³/h, etc)")
     description: str = Field(default=None, description="Description of the signal")
-    num_type: Any['float', 'int', 'bool', 'str'] = Field(default=None, description="The type of the value of the signal", examples=['float', 'int', 'bool', 'str'])
-    value: Any[float, int, bool, str, ua.DataValue] = Field(default=None, description="The value of the signal as a datavalue to avoid having to specify the specifc type", validate_default=False)
+    num_type: Literal['float', 'int', 'bool', 'str'] = Field(default=None, description="The type of the value of the signal", examples=['float', 'int', 'bool', 'str'])
+    value: Literal[float, int, bool, str, ua.DataValue] = Field(default=None, description="The value of the signal as a datavalue to avoid having to specify the specifc type", validate_default=False)
 
     @field_validator('signal_id', 'var_id')
     @classmethod
@@ -46,14 +47,15 @@ class Signal(BaseModel):
     @field_validator('num_type')
     @classmethod
     def convert_to_ua_type(cls, value):
-        if value == 'float':
-            return ua.VariantType.Double
-        elif value == 'int':
-            return ua.VariantType.Int64
-        elif value == 'bool':
-            return ua.VariantType.Boolean
-        elif value == 'str':
-            return ua.VariantType.String
+        return convert_to_ua_type(value)
+        # if value == 'float':
+        #     return ua.VariantType.Double
+        # elif value == 'int':
+        #     return ua.VariantType.Int64
+        # elif value == 'bool':
+        #     return ua.VariantType.Boolean
+        # elif value == 'str':
+        #     return ua.VariantType.String
 
     @model_validator(mode='after')
     def datavalue_from_value(self) -> 'Signal':
@@ -73,7 +75,7 @@ class Signal(BaseModel):
 
             fields.append(
                 new_struct_field(name=field_name,
-                                 dtype=self.convert_to_ua_type(field_info.annotation),
+                                 dtype=convert_to_ua_type(field_info.annotation),
                                  array=True if isinstance(field_value, list) else False,
                                  optional=not field_info.required,
                                  description=field_info.description),
@@ -92,7 +94,7 @@ class Input(Signal):
     """
     input_id: str = Field(description="Used to identify the actuator/object type that generated the input (vfd_distillate, autom_valve_brine, controller_distillate_level, etc).")
     input_type: str = Field(description="Used to identify the type of input: frequency, valve aperture, controller setpoint, etc.")
-    range: List[Any[float, int]] = Field(default=None, description="Operating range of the input")
+    range: List[Literal[float, int]] = Field(default=None, description="Operating range of the input")
 
     @field_validator('range')
     @classmethod

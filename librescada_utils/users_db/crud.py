@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from librescada_utils.logger import logger
-import models, schemas
-from database import get_db
-from authentication import get_password_hash, verify_password
+from . import models, schemas
+from .database import get_db
+from librescada_utils.authentication import get_password_hash, verify_password
 
 """
 CRUD (Create, Read, Update, and Delete), it contains reusable functions to interact with the data in the database. 

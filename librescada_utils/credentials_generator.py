@@ -1,5 +1,7 @@
 import secrets
 import string
+from pathlib import Path
+
 import hjson
 import argparse
 import os
@@ -46,8 +48,10 @@ from librescada_utils.logger import logger
 argparser = argparse.ArgumentParser()
 argparser.add_argument('-c', '--conf_file', help='Path to the configuration file',
                        required=False, default='configuration_files/credentials.hjson')
-argparser.add_argument('-o', '--output_dir', help='Path to the output directory',
-                       required=False, default='.secrets')
+argparser.add_argument('-o', '--output_secrets_dir', help='Path to the output directory for the '
+                                                          'credentials files', required=False, default='.secrets')
+argparser.add_argument('--output_env_dir', help='Path to the output directory for the environment '
+                                                'variables file', required=False, default='environment')
 args = argparser.parse_args()
 
 with open(args.conf_file) as f:
@@ -61,18 +65,30 @@ def generate_password(n=20):
 
 def main():
     # Create directories for storing output files if it does not exist
-    out_dir= args.output_dir
-    os.makedirs(out_dir, exist_ok=True)
+    out_secrets_dir= args.output_secrets_dir
+    os.makedirs(out_secrets_dir, exist_ok=True)
 
-    # Create global environment file
-    with open(os.path.join(out_dir, "env"), "w") as f:
-        for key, data in config["services"].items():
-            users = data["users"]
-            prefix = data["prefix"]
-            for user_key, username in users.items():
+    out_env_dir = args.output_env_dir
+    os.makedirs(out_env_dir, exist_ok=True)
+
+    # Create environment file for all services containing the username of each user
+    for service in config["services"]:
+        config_service = config["services"][service]
+        users = config_service["users"]
+        prefix = config_service["prefix"]
+        file_path = Path( out_env_dir ) / f'{service.lower()}.env'
+
+        with open(file_path, "w") as f:
+            for user_key, user_data in users.items():
+                username = user_data if isinstance(user_data, str) else user_data["username"]
                 f.write(f"{prefix}_{user_key}_USERNAME={username}\n")
 
-    logger.info(f"Created global environment file at {os.path.join(out_dir, 'env')}")
+            # Add application_uri if it exists
+            app_uri = config_service.get("application_uri", None)
+            if app_uri:
+                f.write(f"{prefix}_URI={app_uri}\n")
+
+        logger.info(f"Created service {service} environment file at {file_path}")
 
     # Create:
     # - global txt credentials file for each service
@@ -87,7 +103,7 @@ def main():
 
         # Create credentials file
         credentials_file = f"credentials_{key.lower()}.txt"
-        with open(os.path.join(out_dir, credentials_file), "w") as f:
+        with open(os.path.join(out_secrets_dir, credentials_file), "w") as f:
             for user_key, user_value in users.items():
                 password_value = generate_password(n=n)
 
@@ -110,12 +126,12 @@ def main():
 
                 # Open and write to individual password file
                 password_file = f"{prefix}_{user_key}_PASSWORD.txt"
-                with open(os.path.join(out_dir, password_file), "w") as f2:
+                with open(os.path.join(out_secrets_dir, password_file), "w") as f2:
                     f2.write(password_value)
 
-                logger.info(f'Created service {key} user {user_key} password file at {os.path.join(out_dir, password_file)}')
+                logger.info(f'Created service {key} user {user_key} password file at {os.path.join(out_secrets_dir, password_file)}')
 
-        logger.info(f'Created service {key} credentials file at {os.path.join(out_dir, credentials_file)}')
+        logger.info(f'Created service {key} credentials file at {os.path.join(out_secrets_dir, credentials_file)}')
 
 
 if __name__ == '__main__':

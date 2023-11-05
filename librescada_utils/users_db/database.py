@@ -2,10 +2,9 @@ import sqlalchemy
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
-import logging
 from contextlib import contextmanager
 from librescada_utils.logger import logger
-import models
+from . import models
 
 # SQLALCHEMY_DATABASE_URL = "sqlite:///./users_db/users.db"
 # SQLALCHEMY_DATABASE_URL = "postgresql://user:password@postgresserver/db"
@@ -14,6 +13,8 @@ DEFAULT_DB_PATH = os.getcwd() + "/users_db/users.db"
 # Make sure SQLALCHEMY_DATABASE_URL is defined before importing this module trough an environment variable
 SQLALCHEMY_DATABASE_URL = os.getenv("USERSDB_DATABASE_URL", f"sqlite:///{DEFAULT_DB_PATH}")
 
+# Make sure the database directory exists, get directory from database url
+os.makedirs( os.path.dirname(SQLALCHEMY_DATABASE_URL.replace("sqlite:///", "")), exist_ok=True)
 logger.info(f"Using database at {SQLALCHEMY_DATABASE_URL}")
 
 engine = sqlalchemy.create_engine( SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False} )

@@ -29,6 +29,7 @@ class UserBase(BaseModel):
     """
     username: str
     email: str = "" # Not required
+    role: str
     # organization: str = ""
     # ip_range_allowed: str = "0.0.0.*"
 
